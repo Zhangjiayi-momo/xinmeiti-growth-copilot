@@ -153,6 +153,25 @@ await client.send('Page.reload', { ignoreCache: true });
   });
   if (result.exceptionDetails) throw new Error(result.exceptionDetails.text);
   const value = result.result.value;
+  if (process.env.CAPTURE_README) {
+    const captureDirectory = path.resolve(process.env.CAPTURE_README);
+    await fs.mkdir(captureDirectory, { recursive: true });
+    await client.send('Emulation.setDeviceMetricsOverride', {
+      width: 1440,
+      height: 1200,
+      deviceScaleFactor: 1,
+      mobile: false
+    });
+    for (const [view, filename] of [['dashboard', 'dashboard.png'], ['review', 'review.png'], ['campaigns', 'campaigns.png']]) {
+      await client.send('Runtime.evaluate', { expression: `location.hash = '${view}'` });
+      await sleep(800);
+      const screenshot = await client.send('Page.captureScreenshot', {
+        format: 'png',
+        captureBeyondViewport: false
+      });
+      await fs.writeFile(path.join(captureDirectory, filename), Buffer.from(screenshot.data, 'base64'));
+    }
+  }
   value.runtimeEvents = client.events
     .filter((event) => event.method === 'Runtime.exceptionThrown' || event.method === 'Runtime.consoleAPICalled')
     .slice(-10);
