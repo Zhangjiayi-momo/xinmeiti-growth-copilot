@@ -4,6 +4,7 @@ import {
   aggregateMetrics,
   attachEfficiencyIndexes,
   buildRecommendation,
+  detectAnomalies,
   metricsOf,
   snapshotTrend,
   totalCost
@@ -11,7 +12,7 @@ import {
 
 function record(overrides = {}) {
   return {
-    id: overrides.id || 'r1', platform: overrides.platform || '小红书', recordType: overrides.recordType || 'creator',
+    id: overrides.id || 'r1', platform: overrides.platform || '小红书', recordType: overrides.recordType || 'creator', capturedAt: overrides.capturedAt,
     fees: { quote: 1000, adSpend: 200, sampleCost: 100, serviceCost: 0, ...overrides.fees },
     metrics: { impressions: 10000, views: 8000, likes: 500, favorites: 200, comments: 50, shares: 50, follows: 30, clicks: 200, orders: 10, revenue: 5000, grossProfit: 2400, ...overrides.metrics }
   };
@@ -86,4 +87,19 @@ test('系统建议会识别高 ROAS 表现', () => {
   const result = buildRecommendation(strong, [strong, weak], '成交转化');
   assert.equal(result.action, '继续投放');
   assert.equal(result.confidence, 'medium');
+});
+test('异常检测能够发现 CPE 和转化异常', () => {
+  const good = record({ id: 'good', fees: { quote: 500, adSpend: 0, sampleCost: 0, serviceCost: 0 }, metrics: { impressions: 10000, views: 8000, likes: 500, favorites: 200, comments: 50, shares: 50, clicks: 50, orders: 10, revenue: 5000, grossProfit: 2400 } });
+  const bad = record({ id: 'bad', fees: { quote: 5000, adSpend: 0, sampleCost: 0, serviceCost: 0 }, metrics: { impressions: 10000, views: 8000, likes: 50, favorites: 10, comments: 5, shares: 5, clicks: 500, orders: 1, revenue: 500, grossProfit: 100 }, capturedAt: new Date().toISOString() });
+  const result = detectAnomalies(bad, [{ id: 's1', recordId: 'bad', capturedAt: new Date().toISOString(), metrics: bad.metrics }], [good, bad], '成交转化');
+  assert.ok(result.some((item) => item.code === 'CPE_SPIKE'));
+  assert.ok(result.some((item) => item.code === 'MISSING_CONVERSION') === false);
+  assert.ok(result.some((item) => item.level === 'high'));
+});
+
+test('异常检测能够发现缺少快照和过期数据', () => {
+  const stale = record({ id: 'stale', capturedAt: '2026-01-01T00:00:00.000Z' });
+  const result = detectAnomalies(stale, [], [stale], '内容互动');
+  assert.ok(result.some((item) => item.code === 'NO_SNAPSHOT'));
+  assert.ok(result.some((item) => item.code === 'STALE_DATA'));
 });

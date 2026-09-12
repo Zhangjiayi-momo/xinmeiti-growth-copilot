@@ -256,6 +256,6 @@ export function normalizeDatabase(input) {
     records: reconciledRecords,
     snapshots,
     activeCampaignId: source.activeCampaignId || campaigns[0]?.id || '',
-    updatedAt: new Date().toISOString()
+    updatedAt: source.updatedAt || new Date().toISOString()
   };
 }

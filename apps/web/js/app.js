@@ -16,11 +16,13 @@ import {
 import {
   aggregateMetrics,
   attachEfficiencyIndexes,
+  metricsOf,
   buildRecommendation,
+  detectAnomalies,
   snapshotTrend,
   sortRecords
 } from '../../../packages/metrics/src/metrics.js';
-import { loadDatabase, resetDatabase, saveDatabase } from './store.js';
+import { loadDatabase, resetDatabase, saveDatabase, syncDatabaseFromIndexedDB } from './store.js';
 import { csvTemplate, parseRecordsCsv, recordsToCsv } from './csv.js';
 import {
   downloadBlob,
@@ -55,6 +57,15 @@ const state = {
 
 if (!PAGE_META[state.view]) state.view = 'dashboard';
 
+async function initPersistence() {
+  const result = await syncDatabaseFromIndexedDB();
+  state.storageSource = result.source;
+  if (result.source === 'indexedDB') {
+    state.db = result.database;
+    render();
+    notify('已从 IndexedDB 恢复较新的本地数据');
+  }
+}
 function notify(message, type = 'success') {
   const root = document.getElementById('toast-root');
   const toast = document.createElement('div');
@@ -78,16 +89,56 @@ function snapshotsForRecord(recordId) {
     .sort((left, right) => new Date(left.capturedAt) - new Date(right.capturedAt));
 }
 
+function issuesForRecord(record, cohort) {
+  const objective = campaignById(record.campaignId)?.objective || '内容互动';
+  return detectAnomalies(record, state.db.snapshots, cohort, objective);
+}
+
+function renderIssueList(issues) {
+  if (!issues.length) return '<span class="small muted">当前未发现明显异常</span>';
+  return `<div class="issue-list">${issues.map((issue) => `<div class="issue-item ${escapeAttribute(issue.level)}">
+    <strong>${escapeHtml(issue.title)}</strong>
+    <span>${escapeHtml(issue.detail)}</span>
+  </div>`).join('')}</div>`;
+}
 function renderSnapshotStrip(record) {
-  const snapshots = snapshotsForRecord(record.id).slice(-4);
+  const allSnapshots = snapshotsForRecord(record.id);
+  const snapshots = allSnapshots.slice(-8);
   if (!snapshots.length) return '<span class="small muted">暂无快照</span>';
   const trend = snapshotTrend(record, snapshots);
   const interactionChange = trend.changes?.interactions;
+  const width = 640;
+  const height = 176;
+  const left = 42;
+  const right = 18;
+  const top = 18;
+  const bottom = 34;
+  const maxValue = Math.max(...trend.points.map((point) => point.computed.interaction), 1);
+  const coordinates = trend.points.map((point, index) => {
+    const x = trend.points.length === 1 ? left : left + (index / (trend.points.length - 1)) * (width - left - right);
+    const y = top + (1 - point.computed.interaction / maxValue) * (height - top - bottom);
+    return { x, y, point };
+  });
+  const polyline = coordinates.map((item) => `${item.x.toFixed(1)},${item.y.toFixed(1)}`).join(' ');
+  const areaPath = coordinates.length > 1
+    ? `M ${coordinates[0].x} ${height - bottom} L ${coordinates.map((item) => `${item.x} ${item.y}`).join(' L ')} L ${coordinates.at(-1).x} ${height - bottom} Z`
+    : '';
+  const chart = coordinates.length > 1 ? `<svg class="snapshot-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="互动快照趋势">
+      <line x1="${left}" y1="${top}" x2="${left}" y2="${height - bottom}" class="chart-axis"></line>
+      <line x1="${left}" y1="${height - bottom}" x2="${width - right}" y2="${height - bottom}" class="chart-axis"></line>
+      <path d="${areaPath}" class="chart-area"></path>
+      <polyline points="${polyline}" class="chart-line"></polyline>
+      ${coordinates.map((item) => `<circle cx="${item.x.toFixed(1)}" cy="${item.y.toFixed(1)}" r="4.5" class="chart-point"><title>${escapeHtml(item.point.label)}：${formatNumber(item.point.computed.interaction)} 互动</title></circle>`).join('')}
+      <text x="${left}" y="${height - 10}" class="chart-label">${escapeHtml(coordinates[0].point.label)}</text>
+      <text x="${width - right}" y="${height - 10}" text-anchor="end" class="chart-label">${escapeHtml(coordinates.at(-1).point.label)}</text>
+      <text x="${left - 8}" y="${top + 5}" text-anchor="end" class="chart-label">${formatNumber(maxValue)}</text>
+    </svg>` : '';
   return `<div class="snapshot-trend-head">
       <span>${trend.snapshotCount} 个时间点</span>
       <strong>${interactionChange === null || interactionChange === undefined ? '等待更多快照' : `互动增长 ${formatPercent(interactionChange)}`}</strong>
     </div>
-    <div class="snapshot-strip">${snapshots.map((snapshot) => {
+    ${chart}
+    <div class="snapshot-strip">${snapshots.slice(-4).map((snapshot) => {
       const computed = snapshotTrend(record, [snapshot]).latest?.computed;
       return `<div class="snapshot-chip">
         <span>${escapeHtml(snapshot.label)}</span>
@@ -185,7 +236,17 @@ function renderDashboard() {
   const weakestRoi = topRecord(records.filter((record) => record.computed.roi !== null), 'roi', 'asc');
   const ranked = sortRecords(records, 'efficiencyIndex', 'desc').slice(0, 6);
 
+  const issueRows = records
+    .flatMap((record) => issuesForRecord(record, records).map((issue) => ({ record, issue })))
+    .sort((left, right) => ({ high: 0, medium: 1, low: 2 }[left.issue.level] - { high: 0, medium: 1, low: 2 }[right.issue.level]));
+  const issueSummary = issueRows.reduce((total, item) => total + (item.issue.level === 'high' ? 1 : 0), 0);
+
   const insights = [
+    issueRows[0] && {
+      title: `数据异常：${issueRows[0].record.name}`,
+      body: `${issueRows[0].issue.title}。${issueRows[0].issue.detail}`,
+      value: issueSummary > 0 ? `${issueSummary} 项高优先级` : '待处理'
+    },
     bestEfficiency && {
       title: `效率最高：${bestEfficiency.name}`,
       body: `${bestEfficiency.platform} · ${campaignName(bestEfficiency.campaignId)} · 同层级 ${bestEfficiency.computed.cohortSize} 条样本`,
@@ -399,6 +460,10 @@ function renderReview() {
           <div class="evidence-list">${recommendation.evidence.map((item) => `<span>${escapeHtml(item)}</span>`).join('')}</div>
         </div>
         <div>
+          <div class="small muted" style="margin-bottom:8px">异常检查</div>
+          ${renderIssueList(issuesForRecord(record, rows))}
+        </div>
+        <div>
           <div class="small muted" style="margin-bottom:8px">指标快照 · 共 ${snapshotsForRecord(record.id).length} 条</div>
           ${renderSnapshotStrip(record)}
         </div>
@@ -415,7 +480,7 @@ function renderData() {
     <section class="kpi-grid">
       ${metricCard('营销战役', formatNumber(state.db.campaigns.length), '当前本地数据', true)}
       ${metricCard('内容/达人记录', formatNumber(state.db.records.length), '支持指标快照')}
-      ${metricCard('存储方式', '本地', '浏览器 localStorage')}
+      ${metricCard('存储方式', state.storageSource === 'indexedDB' ? 'IndexedDB' : '本地缓存', '启动时自动择新恢复')}
       ${metricCard('数据版本', 'v2', '支持指标快照')}
       ${metricCard('导出格式', 'CSV / JSON', '适合周报与备份')}
     </section>
@@ -430,6 +495,7 @@ function renderData() {
       <article class="card"><div class="card-body data-action">
         <h4>导出当前数据</h4><p>CSV 用于表格复盘；JSON 可用于备份或迁移到云端版本。</p>
         <div><button class="button secondary" data-action="export-csv">导出 CSV</button></div>
+        <div><button class="button secondary" data-action="export-excel">导出 Excel 兼容文件</button></div>
         <div><button class="button secondary" data-action="export-json">导出 JSON</button></div>
         <div><button class="button ghost" data-action="download-template">下载 CSV 模板</button></div>
       </div></article>
@@ -784,6 +850,32 @@ function exportJson() {
   notify('JSON 已导出');
 }
 
+function excelCell(value) {
+  let text = String(value ?? '');
+  if (/^[=+\-@]/.test(text)) text = `'${text}`;
+  return `<td>${escapeHtml(text)}</td>`;
+}
+
+function exportExcel() {
+  if (!state.db.records.length) return notify('暂无数据可导出', 'error');
+  const campaignNameMap = new Map(state.db.campaigns.map((campaign) => [campaign.id, campaign.name]));
+  const rows = state.db.records.map((record) => {
+    const metrics = metricsOf(record);
+    return [
+      campaignNameMap.get(record.campaignId) || '', record.name, record.recordType === 'creator' ? '达人' : '内容',
+      record.platform, record.creatorName || '', record.followers, record.fees.quote, record.fees.adSpend,
+      record.fees.sampleCost, record.fees.serviceCost, metrics.totalCost, record.metrics.impressions,
+      record.metrics.views, record.metrics.likes, record.metrics.favorites, record.metrics.comments,
+      record.metrics.shares, record.metrics.follows, record.metrics.clicks, record.metrics.orders,
+      record.metrics.revenue, record.metrics.grossProfit, metrics.interactionRate, metrics.cpe,
+      metrics.cpa, metrics.roas, metrics.roi, record.review?.action || '', record.review?.note || '', record.capturedAt
+    ];
+  });
+  const headers = ['战役','记录名称','类型','平台','达人昵称','粉丝数','报价','广告费','样品成本','服务费','总成本','曝光量','阅读/播放','点赞','收藏','评论','分享','涨粉','点击','订单','收入','毛利','互动率','CPE','CPA','ROAS','ROI','行动','备注','数据时间'];
+  const html = `<html><head><meta charset="utf-8"><style>table{border-collapse:collapse}th,td{border:1px solid #ccc;padding:6px;white-space:nowrap}th{background:#e6f6f3;font-weight:bold}</style></head><body><table><thead><tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join('')}</tr></thead><tbody>${rows.map((row) => `<tr>${row.map(excelCell).join('')}</tr>`).join('')}</tbody></table></body></html>`;
+  downloadBlob(`新媒体投放数据_${todayIso()}.xls`, '\uFEFF' + html, 'application/vnd.ms-excel;charset=utf-8');
+  notify('Excel 兼容文件已导出');
+}
 async function importCsv() {
   const file = document.getElementById('csv-file')?.files?.[0];
   const selectedCampaignId = document.getElementById('import-campaign')?.value || '';
@@ -880,6 +972,7 @@ document.addEventListener('click', (event) => {
   if (action === 'save-review') saveReview(id);
   if (action === 'export-report') exportWeeklyReport();
   if (action === 'export-csv') exportCsv();
+  if (action === 'export-excel') exportExcel();
   if (action === 'export-json') exportJson();
   if (action === 'download-template') downloadTemplate();
   if (action === 'import-csv') importCsv();
@@ -945,12 +1038,4 @@ window.addEventListener('hashchange', () => {
 });
 
 render();
-window.addEventListener('hashchange', () => {
-  const view = location.hash.replace('#', '');
-  if (PAGE_META[view]) {
-    state.view = view;
-    render();
-  }
-});
-
-render();
+initPersistence();

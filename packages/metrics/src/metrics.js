@@ -264,6 +264,79 @@ export function buildRecommendation(record = {}, cohortRecords = [], objective =
   };
 }
 
+function median(values) {
+  const sorted = values.filter(Number.isFinite).sort((a, b) => a - b);
+  if (!sorted.length) return null;
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+export function detectAnomalies(record = {}, snapshots = [], cohortRecords = [], objective = '内容互动') {
+  const current = metricsOf(record);
+  const comparable = cohortRecords.filter((item) => peerKeyOf(item) === peerKeyOf(record));
+  const cohort = (comparable.length ? comparable : [record]).map(metricsOf);
+  const cpeMedian = median(cohort.map((item) => item.cpe));
+  const ctrMedian = median(cohort.map((item) => item.ctr));
+  const cvrMedian = median(cohort.map((item) => item.cvr));
+  const trend = snapshotTrend(record, snapshots);
+  const issues = [];
+
+  if (cpeMedian !== null && current.cpe !== null && cpeMedian > 0 && current.cpe > cpeMedian * 1.5) {
+    issues.push({
+      code: 'CPE_SPIKE', level: 'high', title: 'CPE 明显偏高',
+      detail: `当前 CPE ${current.cpe.toFixed(2)} 元，超过同类中位数 ${cpeMedian.toFixed(2)} 元的 1.5 倍。`
+    });
+  }
+
+  if (
+    ctrMedian !== null && cvrMedian !== null &&
+    current.ctr !== null && current.cvr !== null &&
+    current.ctr >= ctrMedian * 1.2 && current.cvr <= cvrMedian * 0.7
+  ) {
+    issues.push({
+      code: 'FUNNEL_BREAK', level: 'high', title: '点击后转化断层',
+      detail: '点击率高于同类水平，但 CVR 明显偏低，问题更可能出现在商品页、承接内容或优惠设置。'
+    });
+  }
+
+  if (trend.points.length >= 2 && trend.changes) {
+    const viewGrowth = trend.changes.views;
+    const interactionGrowth = trend.changes.interactions;
+    if (
+      viewGrowth !== null && interactionGrowth !== null &&
+      viewGrowth - interactionGrowth > 0.35
+    ) {
+      issues.push({
+        code: 'QUALITY_DECLINE', level: 'medium', title: '流量增长快于互动增长',
+        detail: '阅读/播放增长高于互动增长超过 35 个百分点，新增流量可能不够精准或内容吸引力正在下降。'
+      });
+    }
+  }
+
+  if (['成交转化', '种草', '线索获取'].includes(objective) && current.totalCost > 0 && current.orders === 0) {
+    issues.push({
+      code: 'MISSING_CONVERSION', level: 'medium', title: '缺少转化结果',
+      detail: '当前有明确投放成本但订单为 0，需要确认归因窗口、链接配置或承接页是否正常。'
+    });
+  }
+
+  const capturedTime = Date.parse(record.capturedAt || '');
+  if (Number.isFinite(capturedTime) && Date.now() - capturedTime > 7 * 24 * 60 * 60 * 1000) {
+    issues.push({
+      code: 'STALE_DATA', level: 'medium', title: '数据超过 7 天未更新',
+      detail: '当前结论可能已经过期，建议补充 7 天或 30 天快照后再决定是否扩量。'
+    });
+  }
+
+  if (!trend.points.length) {
+    issues.push({
+      code: 'NO_SNAPSHOT', level: 'low', title: '缺少时间快照',
+      detail: '目前只有累计结果，无法判断内容是持续增长还是已经衰退。'
+    });
+  }
+
+  return issues.sort((left, right) => ({ high: 0, medium: 1, low: 2 }[left.level] - { high: 0, medium: 1, low: 2 }[right.level]));
+}
 export function sortRecords(records, sortKey = 'efficiencyIndex', direction = 'desc') {
   const factor = direction === 'asc' ? 1 : -1;
   return [...records].sort((left, right) => {

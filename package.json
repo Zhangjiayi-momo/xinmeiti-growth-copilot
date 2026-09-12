@@ -1,12 +1,12 @@
 {
   "name": "xinmeiti-growth-copilot",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "新媒体内容增长与投放复盘工作台",
   "type": "module",
   "scripts": {
     "start": "node apps/web/server.mjs",
-    "test": "node --test packages/metrics/test/metrics.test.js packages/domain/test/models.test.js apps/web/test/csv.test.js apps/web/test/store.test.js apps/miniapp/test/miniapp.test.cjs",
+    "test": "node --test",
     "build": "node scripts/build.mjs"
   },
   "engines": {

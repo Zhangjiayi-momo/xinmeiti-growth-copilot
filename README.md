@@ -4,7 +4,7 @@
 
 ## 当前版本
 
-第一阶段 Web MVP 已实现：
+当前 Web v0.3 已实现：
 
 - 营销战役管理
 - 内容与达人合作记录
@@ -13,7 +13,9 @@
 - 同平台、同记录类型的效率指数
 - 数据看板、达人排序和复盘行动
 - CSV 导入、CSV 模板、CSV/JSON 导出
-- 浏览器本地持久化
+- IndexedDB + localStorage 双持久化
+- 快照增长图和异常检测
+- CSV、JSON、Excel 兼容导出
 - 演示数据一键恢复
 - 24 小时、72 小时、7 天指标快照
 - 基于同类样本的系统行动建议
@@ -38,7 +40,7 @@ node apps/web/server.mjs
 ## 测试
 
 ```powershell
-node --test packages/metrics/test/metrics.test.js packages/domain/test/models.test.js
+node --test
 ```
 
 ## 构建
