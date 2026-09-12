@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="新媒体内容增长与投放复盘工作台">
+  <title>新媒体增长作战台</title>
+  <link rel="stylesheet" href="./css/styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">增</div>
+        <div>
+          <strong>新媒体增长作战台</strong>
+          <span>内容与投放闭环</span>
+        </div>
+      </div>
+
+      <nav class="main-nav" aria-label="主导航">
+        <button class="nav-item active" data-view="dashboard"><span>总览</span><small>核心指标</small></button>
+        <button class="nav-item" data-view="campaigns"><span>投放战役</span><small>目标与预算</small></button>
+        <button class="nav-item" data-view="records"><span>内容与达人</span><small>合作记录</small></button>
+        <button class="nav-item" data-view="review"><span>数据复盘</span><small>行动建议</small></button>
+        <button class="nav-item" data-view="data"><span>导入导出</span><small>数据管理</small></button>
+      </nav>
+
+      <div class="sidebar-note">
+        <span class="live-dot"></span>
+        <div>
+          <strong>本地数据模式</strong>
+          <small>数据仅保存在当前浏览器</small>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow" id="page-eyebrow">运营总览</p>
+          <h1 id="page-title">数据看板</h1>
+          <p class="page-subtitle" id="page-subtitle">用统一口径识别值得继续投入的内容与达人。</p>
+        </div>
+        <div class="topbar-actions" id="topbar-actions"></div>
+      </header>
+
+      <section id="app" class="app-content" aria-live="polite"></section>
+    </main>
+  </div>
+
+  <div id="modal-root"></div>
+  <div id="toast-root" class="toast-root" aria-live="polite"></div>
+  <script type="module" src="./js/app.js"></script>
+</body>
+</html>
