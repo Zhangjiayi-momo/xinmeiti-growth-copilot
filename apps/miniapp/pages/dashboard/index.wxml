@@ -1,0 +1,42 @@
+<view class="page">
+  <view class="hero">
+    <text class="hero-title">新媒体增长作战台</text>
+    <text class="hero-sub">用统一口径查看内容与达人投放效率，记录当前共 {{recordCount}} 条。</text>
+    <button class="primary-btn" bindtap="goAdd">快速录入数据</button>
+  </view>
+
+  <view class="section">
+    <view class="section-title"><text>核心指标</text><text class="card-sub">本地实时计算</text></view>
+    <view class="stat-grid">
+      <view class="stat" wx:for="{{stats}}" wx:key="label">
+        <text class="stat-label">{{item.label}}</text>
+        <text class="stat-value">{{item.value}}</text>
+        <text class="stat-note">{{item.note}}</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="section">
+    <view class="section-title"><text>高表现记录</text><text class="card-sub" bindtap="goRecords">查看全部</text></view>
+    <block wx:if="{{topRecords.length}}">
+      <view class="card" wx:for="{{topRecords}}" wx:key="id" bindtap="goEdit" data-id="{{item.id}}">
+        <view class="card-row">
+          <view>
+            <text class="card-title">{{item.name}}</text>
+            <text class="card-sub">{{item.platform}} · {{item.creatorName || '自营内容'}}</text>
+          </view>
+          <text class="badge">效率 {{item.efficiency}}</text>
+        </view>
+        <view class="metrics">
+          <view class="metric"><text class="metric-label">成本</text><text class="metric-value">{{item.costText}}</text></view>
+          <view class="metric"><text class="metric-label">互动</text><text class="metric-value">{{item.interactionText}}</text></view>
+          <view class="metric"><text class="metric-label">ROAS</text><text class="metric-value">{{item.roasText}}</text></view>
+        </view>
+      </view>
+    </block>
+    <view class="card empty" wx:else>
+      <text class="empty-title">暂无数据</text>
+      <text class="empty-sub">点击上方按钮录入第一条内容或达人合作记录。</text>
+    </view>
+  </view>
+</view>

@@ -1,0 +1,10 @@
+{
+  "description": "新媒体增长作战台小程序伴侣",
+  "packOptions": { "ignore": [] },
+  "setting": { "es6": true, "enhance": true, "postcss": true, "minified": true },
+  "compileType": "miniprogram",
+  "libVersion": "trial",
+  "appid": "touristappid",
+  "projectname": "xinmeiti-growth-copilot-miniapp",
+  "miniprogramRoot": "./"
+}

@@ -1,0 +1,25 @@
+{
+  "pages": [
+    "pages/dashboard/index",
+    "pages/records/index",
+    "pages/record-form/index"
+  ],
+  "window": {
+    "navigationBarTitleText": "新媒体增长作战台",
+    "navigationBarBackgroundColor": "#153034",
+    "navigationBarTextStyle": "white",
+    "backgroundColor": "#f3f6f7"
+  },
+  "tabBar": {
+    "color": "#718084",
+    "selectedColor": "#0f8f83",
+    "backgroundColor": "#ffffff",
+    "borderStyle": "white",
+    "list": [
+      { "pagePath": "pages/dashboard/index", "text": "总览" },
+      { "pagePath": "pages/records/index", "text": "记录" }
+    ]
+  },
+  "style": "v2",
+  "sitemapLocation": "sitemap.json"
+}

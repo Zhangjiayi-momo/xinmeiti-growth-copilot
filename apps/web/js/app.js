@@ -4,15 +4,20 @@ import {
   SUPPORTED_PLATFORMS,
   createEmptyCampaign,
   createEmptyRecord,
+  createEmptySnapshot,
   normalizeCampaign,
   normalizeRecord,
+  normalizeSnapshot,
   toNonNegativeNumber,
   validateCampaign,
-  validateRecord
+  validateRecord,
+  validateSnapshot
 } from '../../../packages/domain/src/models.js';
 import {
   aggregateMetrics,
   attachEfficiencyIndexes,
+  buildRecommendation,
+  snapshotTrend,
   sortRecords
 } from '../../../packages/metrics/src/metrics.js';
 import { loadDatabase, resetDatabase, saveDatabase } from './store.js';
@@ -67,6 +72,30 @@ function recordById(id) {
   return state.db.records.find((record) => record.id === id);
 }
 
+function snapshotsForRecord(recordId) {
+  return state.db.snapshots
+    .filter((snapshot) => snapshot.recordId === recordId)
+    .sort((left, right) => new Date(left.capturedAt) - new Date(right.capturedAt));
+}
+
+function renderSnapshotStrip(record) {
+  const snapshots = snapshotsForRecord(record.id).slice(-4);
+  if (!snapshots.length) return '<span class="small muted">暂无快照</span>';
+  const trend = snapshotTrend(record, snapshots);
+  const interactionChange = trend.changes?.interactions;
+  return `<div class="snapshot-trend-head">
+      <span>${trend.snapshotCount} 个时间点</span>
+      <strong>${interactionChange === null || interactionChange === undefined ? '等待更多快照' : `互动增长 ${formatPercent(interactionChange)}`}</strong>
+    </div>
+    <div class="snapshot-strip">${snapshots.map((snapshot) => {
+      const computed = snapshotTrend(record, [snapshot]).latest?.computed;
+      return `<div class="snapshot-chip">
+        <span>${escapeHtml(snapshot.label)}</span>
+        <strong>${computed ? formatNumber(computed.interaction) : '—'} 互动</strong>
+        <small>${formatDate(snapshot.capturedAt)} · ${computed ? formatNumber(computed.views) : '—'} 阅读/播放</small>
+      </div>`;
+    }).join('')}</div>`;
+}
 function campaignById(id) {
   return state.db.campaigns.find((campaign) => campaign.id === id);
 }
@@ -299,7 +328,7 @@ function renderRecordTable(records, { compact = false } = {}) {
       <th>记录</th><th>平台</th><th class="num">总成本</th><th class="num">互动</th>
       <th class="num">互动率</th><th class="num">CPE</th>
       ${compact ? '' : '<th class="num">CPA</th><th class="num">ROAS</th><th class="num">ROI</th>'}
-      <th class="num">效率指数</th>${compact ? '' : '<th>操作</th>'}
+      <th class="num">效率指数</th><th class="num">快照</th>${compact ? '' : '<th>操作</th>'}
     </tr></thead>
     <tbody>
       ${records.map((record) => {
@@ -315,7 +344,8 @@ function renderRecordTable(records, { compact = false } = {}) {
           <td class="num">${m.cpe === null ? '—' : formatMoney(m.cpe)}</td>
           ${compact ? '' : `<td class="num">${m.cpa === null ? '—' : formatMoney(m.cpa)}</td><td class="num">${m.roas === null ? '—' : formatMultiple(m.roas)}</td><td class="num">${m.roi === null ? '—' : formatPercent(m.roi)}</td>`}
           <td class="num"><span class="score-pill ${efficiencyClass(m.efficiencyIndex)}">${m.efficiencyIndex === null ? '样本不足' : m.efficiencyIndex}</span></td>
-          ${compact ? '' : `<td><div class="actions"><button class="button secondary small" data-action="edit-record" data-id="${escapeAttribute(record.id)}">编辑</button><button class="button ghost small" data-action="delete-record" data-id="${escapeAttribute(record.id)}">删除</button></div></td>`}
+          <td class="num">${snapshotsForRecord(record.id).length}</td>
+          ${compact ? '' : `<td><div class="actions"><button class="button ghost small" data-action="add-snapshot" data-id="${escapeAttribute(record.id)}">快照</button><button class="button secondary small" data-action="edit-record" data-id="${escapeAttribute(record.id)}">编辑</button><button class="button ghost small" data-action="delete-record" data-id="${escapeAttribute(record.id)}">删除</button></div></td>`}
         </tr>`;
       }).join('')}
     </tbody>
@@ -346,11 +376,14 @@ function renderReview() {
     <div class="filter-bar">
       <div class="field" style="min-width:220px"><label for="review-campaign">战役</label><select id="review-campaign" data-filter="campaign">${renderCampaignOptions(state.selectedCampaignId)}</select></div>
       <div class="field" style="min-width:180px"><label for="review-action">行动状态</label><select id="review-action" data-filter="review-action"><option value="all">全部状态</option>${REVIEW_ACTIONS.map((action) => `<option value="${escapeAttribute(action)}" ${state.reviewAction === action ? 'selected' : ''}>${escapeHtml(action)}</option>`).join('')}</select></div>
-      <span class="small muted">共 ${rows.length} 条记录</span>
+      <span class="small muted">共 ${rows.length} 条记录。系统建议仅基于当前同类样本，不替代增量实验。</span>
     </div>
     ${!rows.length ? `<section class="card"><div class="empty-state"><div class="empty-icon">✓</div><h3>当前筛选下没有记录</h3><p>可以切换战役或行动状态。</p></div></section>` : `
     <section class="stack">${rows.map((record) => {
       const m = record.computed;
+      const campaign = campaignById(record.campaignId);
+      const recommendation = buildRecommendation(record, rows, campaign?.objective || '内容互动');
+      const confidenceLabel = { high: '较高', medium: '一般', low: '较低' }[recommendation.confidence] || '较低';
       return `<article class="review-card">
         <div class="review-card-head"><div><h3>${escapeHtml(record.name)}</h3><p>${escapeHtml(record.platform)} · ${record.recordType === 'creator' ? `达人 ${escapeHtml(record.creatorName)}` : '自营内容'} · ${escapeHtml(campaignName(record.campaignId))}</p></div><span class="score-pill ${efficiencyClass(m.efficiencyIndex)}">效率 ${m.efficiencyIndex === null ? '样本不足' : m.efficiencyIndex}</span></div>
         <div class="review-metrics">
@@ -360,6 +393,15 @@ function renderReview() {
           <div class="review-metric"><span>ROAS</span><strong>${m.roas === null ? '—' : formatMultiple(m.roas)}</strong></div>
           <div class="review-metric"><span>ROI</span><strong>${m.roi === null ? '—' : formatPercent(m.roi)}</strong></div>
         </div>
+        <div class="recommendation-panel">
+          <div class="recommendation-head"><div><span class="eyebrow">系统建议 · 置信度${confidenceLabel}</span><h4>${escapeHtml(recommendation.action)}</h4></div><button class="button secondary small" data-action="apply-recommendation" data-id="${escapeAttribute(record.id)}" data-suggested="${escapeAttribute(recommendation.action)}" data-reason="${escapeAttribute(recommendation.reason)}">采用建议</button></div>
+          <p>${escapeHtml(recommendation.reason)}</p>
+          <div class="evidence-list">${recommendation.evidence.map((item) => `<span>${escapeHtml(item)}</span>`).join('')}</div>
+        </div>
+        <div>
+          <div class="small muted" style="margin-bottom:8px">指标快照 · 共 ${snapshotsForRecord(record.id).length} 条</div>
+          ${renderSnapshotStrip(record)}
+        </div>
         <div class="review-note-row"><div><div class="form-grid">
           <div class="field"><label for="review-action-${escapeAttribute(record.id)}">下一步行动</label><select id="review-action-${escapeAttribute(record.id)}">${REVIEW_ACTIONS.map((action) => `<option value="${escapeAttribute(action)}" ${record.review?.action === action ? 'selected' : ''}>${escapeHtml(action)}</option>`).join('')}</select></div>
           <div class="field"><label for="review-owner-${escapeAttribute(record.id)}">负责人</label><input id="review-owner-${escapeAttribute(record.id)}" value="${escapeAttribute(record.review?.owner || '')}" placeholder="填写负责人"></div>
@@ -368,14 +410,13 @@ function renderReview() {
       </article>`;
     }).join('')}</section>`}`;
 }
-
 function renderData() {
   return `
     <section class="kpi-grid">
       ${metricCard('营销战役', formatNumber(state.db.campaigns.length), '当前本地数据', true)}
-      ${metricCard('内容/达人记录', formatNumber(state.db.records.length), '可导入导出')}
+      ${metricCard('内容/达人记录', formatNumber(state.db.records.length), '支持指标快照')}
       ${metricCard('存储方式', '本地', '浏览器 localStorage')}
-      ${metricCard('数据版本', 'v1', '可迁移到云端')}
+      ${metricCard('数据版本', 'v2', '支持指标快照')}
       ${metricCard('导出格式', 'CSV / JSON', '适合周报与备份')}
     </section>
     <section class="data-grid">
@@ -534,10 +575,25 @@ function saveCampaignForm(form) {
   notify(existing ? '战役已更新' : '战役已创建');
 }
 
+function syncSnapshotForRecord(record, options = {}) {
+  const capturedAt = options.capturedAt || record.capturedAt || new Date().toISOString();
+  const existing = state.db.snapshots.find((snapshot) => snapshot.recordId === record.id && snapshot.capturedAt === capturedAt);
+  const snapshot = normalizeSnapshot({
+    ...(existing || {}),
+    id: existing?.id,
+    recordId: record.id,
+    label: options.label || existing?.label || '当前数据',
+    capturedAt,
+    metrics: record.metrics
+  }, record.id);
+  state.db.snapshots = state.db.snapshots.filter((item) => !(item.recordId === record.id && item.capturedAt === capturedAt));
+  state.db.snapshots.push(snapshot);
+  return { ...record, capturedAt, metrics: snapshot.metrics };
+}
 function saveRecordForm(form) {
   const formData = new FormData(form);
   const existing = formData.get('id') ? recordById(formData.get('id')) : null;
-  const record = normalizeRecord({
+  let record = normalizeRecord({
     ...(existing || {}),
     id: formData.get('id') || undefined,
     campaignId: formData.get('campaignId'),
@@ -570,6 +626,9 @@ function saveRecordForm(form) {
   }, formData.get('campaignId'));
   const errors = validateRecord(record);
   if (errors.length) return notify(errors[0], 'error');
+  record = syncSnapshotForRecord(record, {
+    label: existing ? '数据修正' : (record.recordType === 'creator' ? '合作数据' : '发布数据')
+  });
   if (existing) {
     state.db.records = state.db.records.map((item) => item.id === existing.id ? record : item);
   } else {
@@ -581,6 +640,88 @@ function saveRecordForm(form) {
   notify(existing ? '记录已更新' : '记录已创建');
 }
 
+function toDateTimeLocal(value) {
+  const date = value ? new Date(value) : new Date();
+  if (Number.isNaN(date.getTime())) return new Date().toISOString().slice(0, 16);
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 16);
+}
+
+function openSnapshotModal(recordId) {
+  const record = recordById(recordId);
+  if (!record) return notify('记录不存在', 'error');
+  const latest = snapshotsForRecord(recordId).at(-1);
+  const metrics = latest?.metrics || record.metrics;
+  openModal(`
+    <form data-form="snapshot">
+      <div class="modal-header"><div><h2>新增指标快照</h2><p>${escapeHtml(record.name)} · 保留 24 小时、72 小时和 7 天数据，后续才能判断增长与衰退。</p></div><button type="button" class="close-button" data-action="close-modal" aria-label="关闭">×</button></div>
+      <div class="modal-body">
+        <input type="hidden" name="recordId" value="${escapeAttribute(record.id)}">
+        <div class="form-grid">
+          <div class="field"><label>快照名称 *</label><select name="label"><option>24小时</option><option>72小时</option><option>7天</option><option>14天</option><option>30天</option><option>自定义</option></select></div>
+          <div class="field"><label>数据时间 *</label><input name="capturedAt" type="datetime-local" required value="${toDateTimeLocal(new Date().toISOString())}"></div>
+        </div>
+        <div class="form-section"><h3 class="form-section-title">指标数据 <span>填写该时间点累计数据</span></h3><div class="form-grid">
+          ${[['impressions','曝光量'],['views','阅读/播放量'],['likes','点赞'],['favorites','收藏'],['comments','评论'],['shares','分享'],['follows','涨粉/关注'],['clicks','点击'],['orders','订单/转化数'],['revenue','归因收入'],['grossProfit','归因毛利（不含投放费用）']].map(([key,label]) => `<div class="field"><label>${label}</label><input name="metrics.${key}" type="number" min="0" step="0.01" value="${metrics[key] ?? 0}"></div>`).join('')}
+        </div></div>
+      </div>
+      <div class="modal-footer"><button type="button" class="button ghost" data-action="close-modal">取消</button><button class="button primary" type="submit">保存快照</button></div>
+    </form>`, false);
+}
+
+function saveSnapshotForm(form) {
+  const formData = new FormData(form);
+  const record = recordById(formData.get('recordId'));
+  if (!record) return notify('记录不存在', 'error');
+  const capturedDate = new Date(formData.get('capturedAt'));
+  const snapshot = normalizeSnapshot({
+    recordId: record.id,
+    label: formData.get('label'),
+    capturedAt: Number.isNaN(capturedDate.getTime()) ? new Date().toISOString() : capturedDate.toISOString(),
+    metrics: {
+      impressions: numberFrom(formData, 'metrics.impressions'),
+      views: numberFrom(formData, 'metrics.views'),
+      likes: numberFrom(formData, 'metrics.likes'),
+      favorites: numberFrom(formData, 'metrics.favorites'),
+      comments: numberFrom(formData, 'metrics.comments'),
+      shares: numberFrom(formData, 'metrics.shares'),
+      follows: numberFrom(formData, 'metrics.follows'),
+      clicks: numberFrom(formData, 'metrics.clicks'),
+      orders: numberFrom(formData, 'metrics.orders'),
+      revenue: numberFrom(formData, 'metrics.revenue'),
+      grossProfit: numberFrom(formData, 'metrics.grossProfit')
+    }
+  }, record.id);
+  const errors = validateSnapshot(snapshot);
+  if (errors.length) return notify(errors[0], 'error');
+  state.db.snapshots = state.db.snapshots.filter((item) => !(item.recordId === record.id && item.capturedAt === snapshot.capturedAt));
+  state.db.snapshots.push(snapshot);
+  const latest = snapshotsForRecord(record.id).at(-1);
+  state.db.records = state.db.records.map((item) => item.id === record.id ? normalizeRecord({
+    ...item,
+    capturedAt: latest.capturedAt,
+    metrics: latest.metrics,
+    updatedAt: new Date().toISOString()
+  }, item.campaignId) : item);
+  state.db = saveDatabase(state.db);
+  closeModal();
+  render();
+  notify('指标快照已保存');
+}
+
+function applyRecommendation(recordId, action, reason) {
+  state.db.records = state.db.records.map((record) => record.id === recordId ? normalizeRecord({
+    ...record,
+    review: {
+      ...record.review,
+      action,
+      note: record.review?.note || reason
+    }
+  }, record.campaignId) : record);
+  state.db = saveDatabase(state.db);
+  render();
+  notify(`已采用系统建议：${action}`);
+}
 function saveReview(id) {
   const record = recordById(id);
   if (!record) return notify('记录不存在', 'error');
@@ -665,6 +806,7 @@ async function importCsv() {
         continue;
       }
       state.db.records.push(record);
+      state.db.snapshots.push(normalizeSnapshot({ recordId: record.id, label: 'CSV导入', capturedAt: record.capturedAt, metrics: record.metrics }));
       existingKeys.add(key);
       added += 1;
     }
@@ -687,6 +829,7 @@ function deleteRecord(id) {
   if (!record) return;
   if (!confirm(`确认删除「${record.name}」？此操作无法撤销。`)) return;
   state.db.records = state.db.records.filter((item) => item.id !== id);
+  state.db.snapshots = state.db.snapshots.filter((item) => item.recordId !== id);
   state.db = saveDatabase(state.db);
   render();
   notify('记录已删除');
@@ -699,6 +842,8 @@ function deleteCampaign(id) {
   if (!confirm(`确认删除战役「${campaign.name}」及其中 ${count} 条记录？此操作无法撤销。`)) return;
   state.db.campaigns = state.db.campaigns.filter((item) => item.id !== id);
   state.db.records = state.db.records.filter((record) => record.campaignId !== id);
+  const remainingRecordIds = new Set(state.db.records.map((record) => record.id));
+  state.db.snapshots = state.db.snapshots.filter((snapshot) => remainingRecordIds.has(snapshot.recordId));
   state.db.activeCampaignId = state.db.campaigns[0]?.id || '';
   if (state.selectedCampaignId === id) state.selectedCampaignId = 'all';
   state.db = saveDatabase(state.db);
@@ -728,6 +873,8 @@ document.addEventListener('click', (event) => {
   if (action === 'delete-campaign') deleteCampaign(id);
   if (action === 'new-record') openRecordModal();
   if (action === 'edit-record') openRecordModal(id);
+  if (action === 'add-snapshot') openSnapshotModal(id);
+  if (action === 'apply-recommendation') applyRecommendation(id, actionElement.dataset.suggested || '待复盘', actionElement.dataset.reason || '');
   if (action === 'delete-record') deleteRecord(id);
   if (action === 'close-modal') closeModal();
   if (action === 'save-review') saveReview(id);
@@ -758,6 +905,7 @@ document.addEventListener('submit', (event) => {
   event.preventDefault();
   if (form.dataset.form === 'campaign') saveCampaignForm(form);
   if (form.dataset.form === 'record') saveRecordForm(form);
+  if (form.dataset.form === 'snapshot') saveSnapshotForm(form);
 });
 
 document.addEventListener('change', (event) => {

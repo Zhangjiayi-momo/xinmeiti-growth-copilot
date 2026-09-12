@@ -1,0 +1,34 @@
+<view class="page">
+  <view class="form-card">
+    <view class="section-title"><text>{{isEdit ? '编辑记录' : '快速录入'}}</text></view>
+    <view class="form-group"><text class="form-label">记录名称 *</text><input class="form-input" value="{{record.name}}" bindinput="onField" data-field="name" placeholder="例如：敏感肌换季实测" /></view>
+    <view class="form-group"><text class="form-label">平台</text><picker mode="selector" range="{{platforms}}" bindchange="onPlatformChange"><view class="form-picker">{{record.platform}}</view></picker></view>
+    <view class="form-group"><text class="form-label">记录类型</text><picker mode="selector" range="{{types}}" range-key="label" bindchange="onTypeChange"><view class="form-picker">{{record.recordType === 'creator' ? '达人合作' : '自营内容'}}</view></picker></view>
+    <view class="form-group" wx:if="{{record.recordType === 'creator'}}"><text class="form-label">达人昵称 *</text><input class="form-input" value="{{record.creatorName}}" bindinput="onField" data-field="creatorName" placeholder="达人昵称" /></view>
+    <view class="form-group"><text class="form-label">内容链接</text><input class="form-input" value="{{record.url}}" bindinput="onField" data-field="url" placeholder="https://..." /></view>
+    <view class="form-group"><text class="form-label">粉丝数</text><input class="form-input" type="number" value="{{record.followers}}" bindinput="onNumberField" data-field="followers" /></view>
+  </view>
+
+  <view class="form-card" style="margin-top:20rpx">
+    <view class="section-title"><text>成本</text><text class="card-sub">单位：元</text></view>
+    <view class="form-group"><text class="form-label">达人报价</text><input class="form-input" type="digit" value="{{record.fees.quote}}" bindinput="onNumberField" data-field="fees.quote" /></view>
+    <view class="form-group"><text class="form-label">广告投放费</text><input class="form-input" type="digit" value="{{record.fees.adSpend}}" bindinput="onNumberField" data-field="fees.adSpend" /></view>
+    <view class="form-group"><text class="form-label">样品成本</text><input class="form-input" type="digit" value="{{record.fees.sampleCost}}" bindinput="onNumberField" data-field="fees.sampleCost" /></view>
+    <view class="form-group"><text class="form-label">服务费</text><input class="form-input" type="digit" value="{{record.fees.serviceCost}}" bindinput="onNumberField" data-field="fees.serviceCost" /></view>
+  </view>
+
+  <view class="form-card" style="margin-top:20rpx">
+    <view class="section-title"><text>流量与互动</text></view>
+    <view class="form-group"><text class="form-label">曝光量</text><input class="form-input" type="number" value="{{record.metrics.impressions}}" bindinput="onNumberField" data-field="metrics.impressions" /></view>
+    <view class="form-group"><text class="form-label">阅读 / 播放量</text><input class="form-input" type="number" value="{{record.metrics.views}}" bindinput="onNumberField" data-field="metrics.views" /></view>
+    <view class="form-group"><text class="form-label">点赞</text><input class="form-input" type="number" value="{{record.metrics.likes}}" bindinput="onNumberField" data-field="metrics.likes" /></view>
+    <view class="form-group"><text class="form-label">收藏</text><input class="form-input" type="number" value="{{record.metrics.favorites}}" bindinput="onNumberField" data-field="metrics.favorites" /></view>
+    <view class="form-group"><text class="form-label">评论</text><input class="form-input" type="number" value="{{record.metrics.comments}}" bindinput="onNumberField" data-field="metrics.comments" /></view>
+    <view class="form-group"><text class="form-label">分享</text><input class="form-input" type="number" value="{{record.metrics.shares}}" bindinput="onNumberField" data-field="metrics.shares" /></view>
+    <view class="form-group"><text class="form-label">点击</text><input class="form-input" type="number" value="{{record.metrics.clicks}}" bindinput="onNumberField" data-field="metrics.clicks" /></view>
+    <view class="form-group"><text class="form-label">订单 / 转化数</text><input class="form-input" type="number" value="{{record.metrics.orders}}" bindinput="onNumberField" data-field="metrics.orders" /></view>
+    <view class="form-group"><text class="form-label">归因收入</text><input class="form-input" type="digit" value="{{record.metrics.revenue}}" bindinput="onNumberField" data-field="metrics.revenue" /></view>
+    <view class="form-group"><text class="form-label">归因毛利</text><input class="form-input" type="digit" value="{{record.metrics.grossProfit}}" bindinput="onNumberField" data-field="metrics.grossProfit" /><text class="form-hint">毛利不扣除投放费用，用于计算 ROI。</text></view>
+  </view>
+  <button class="primary-btn" bindtap="submit">保存记录</button>
+</view>

@@ -301,3 +301,52 @@ tbody tr:hover { background: #fbfdfc; }
   .bar-value { grid-column: 2; grid-row: 1; }
   .topbar-actions .button { flex: 1; }
 }
+.snapshot-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 9px;
+}
+.snapshot-chip {
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: linear-gradient(145deg, #fbfdfc, #f1f7f5);
+}
+.snapshot-chip span,
+.snapshot-chip strong,
+.snapshot-chip small { display: block; }
+.snapshot-chip span { color: var(--brand-dark); font-size: 10px; font-weight: 800; }
+.snapshot-chip strong { margin-top: 6px; font-size: 13px; }
+.snapshot-chip small { margin-top: 4px; color: var(--muted); font-size: 10px; }
+.recommendation-panel {
+  padding: 15px;
+  border: 1px solid #cce5e0;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #f0faf7, #f9fcfb);
+}
+.recommendation-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.recommendation-head h4 { margin: 3px 0 0; font-size: 16px; color: var(--brand-dark); }
+.recommendation-panel > p { margin: 10px 0; color: #4e6265; font-size: 12px; line-height: 1.6; }
+.evidence-list { display: flex; flex-wrap: wrap; gap: 7px; }
+.evidence-list span {
+  padding: 5px 8px;
+  border-radius: 999px;
+  color: #4f6768;
+  background: rgba(255,255,255,0.76);
+  font-size: 10px;
+}
+.snapshot-trend-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 9px;
+  color: var(--muted);
+  font-size: 10px;
+}
+.snapshot-trend-head strong { color: var(--brand-dark); font-size: 11px; }

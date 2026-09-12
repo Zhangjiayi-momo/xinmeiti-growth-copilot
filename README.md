@@ -15,6 +15,9 @@
 - CSV 导入、CSV 模板、CSV/JSON 导出
 - 浏览器本地持久化
 - 演示数据一键恢复
+- 24 小时、72 小时、7 天指标快照
+- 基于同类样本的系统行动建议
+- 原生微信小程序伴侣（总览、记录、快速录入）
 
 ## 启动
 
@@ -50,7 +53,7 @@ node scripts/build.mjs
 
 ```text
 apps/web/            Web MVP
-apps/miniapp/        小程序扩展预留
+apps/miniapp/        原生微信小程序伴侣
 packages/domain/     数据模型、校验和演示数据
 packages/metrics/    指标计算引擎
 docs/                产品、数据字典和指标口径

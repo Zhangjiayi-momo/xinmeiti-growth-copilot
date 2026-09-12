@@ -1,4 +1,4 @@
-export const DATABASE_VERSION = 1;
+export const DATABASE_VERSION = 2;
 export const RECORD_TYPES = ['content', 'creator'];
 export const SUPPORTED_PLATFORMS = ['抖音', '小红书', 'B站', '公众号/视频号'];
 export const OBJECTIVES = ['内容互动', '涨粉', '种草', '线索获取', '成交转化', '品牌曝光'];
@@ -13,6 +13,22 @@ export function createId(prefix = 'id') {
 export function toNonNegativeNumber(value) {
   const number = Number(value);
   return Number.isFinite(number) ? Math.max(0, number) : 0;
+}
+
+export function normalizeMetrics(input = {}) {
+  return {
+    impressions: toNonNegativeNumber(input.impressions),
+    views: toNonNegativeNumber(input.views),
+    likes: toNonNegativeNumber(input.likes),
+    favorites: toNonNegativeNumber(input.favorites),
+    comments: toNonNegativeNumber(input.comments),
+    shares: toNonNegativeNumber(input.shares),
+    follows: toNonNegativeNumber(input.follows),
+    clicks: toNonNegativeNumber(input.clicks),
+    orders: toNonNegativeNumber(input.orders),
+    revenue: toNonNegativeNumber(input.revenue),
+    grossProfit: toNonNegativeNumber(input.grossProfit)
+  };
 }
 
 export function createEmptyCampaign(overrides = {}) {
@@ -55,19 +71,7 @@ export function createEmptyRecord(campaignId = '', overrides = {}) {
       sampleCost: 0,
       serviceCost: 0
     },
-    metrics: {
-      impressions: 0,
-      views: 0,
-      likes: 0,
-      favorites: 0,
-      comments: 0,
-      shares: 0,
-      follows: 0,
-      clicks: 0,
-      orders: 0,
-      revenue: 0,
-      grossProfit: 0
-    },
+    metrics: normalizeMetrics(overrides.metrics),
     review: {
       action: '待复盘',
       note: '',
@@ -79,7 +83,36 @@ export function createEmptyRecord(campaignId = '', overrides = {}) {
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     ...overrides,
-    id: overrides.id || generatedId
+    id: overrides.id || generatedId,
+    metrics: normalizeMetrics(overrides.metrics),
+    fees: {
+      quote: toNonNegativeNumber(overrides.fees?.quote),
+      adSpend: toNonNegativeNumber(overrides.fees?.adSpend),
+      sampleCost: toNonNegativeNumber(overrides.fees?.sampleCost),
+      serviceCost: toNonNegativeNumber(overrides.fees?.serviceCost)
+    },
+    review: {
+      action: overrides.review?.action || '待复盘',
+      note: overrides.review?.note || '',
+      owner: overrides.review?.owner || '',
+      dueAt: overrides.review?.dueAt || ''
+    }
+  };
+}
+
+export function createEmptySnapshot(recordId = '', overrides = {}) {
+  const generatedId = createId('snapshot');
+  return {
+    id: generatedId,
+    recordId,
+    label: '当前数据',
+    capturedAt: new Date().toISOString(),
+    metrics: normalizeMetrics(overrides.metrics),
+    createdAt: new Date().toISOString(),
+    ...overrides,
+    id: overrides.id || generatedId,
+    recordId: overrides.recordId || recordId,
+    metrics: normalizeMetrics(overrides.metrics)
   };
 }
 
@@ -87,6 +120,7 @@ export function normalizeCampaign(input = {}) {
   const campaign = createEmptyCampaign(input);
   return {
     ...campaign,
+    id: campaign.id || createId('campaign'),
     budget: toNonNegativeNumber(campaign.budget),
     platforms: Array.isArray(campaign.platforms) ? [...new Set(campaign.platforms.filter(Boolean))] : [],
     updatedAt: new Date().toISOString()
@@ -97,6 +131,7 @@ export function normalizeRecord(input = {}, fallbackCampaignId = '') {
   const record = createEmptyRecord(input.campaignId || fallbackCampaignId, input);
   return {
     ...record,
+    id: record.id || createId('record'),
     campaignId: record.campaignId || fallbackCampaignId,
     followers: toNonNegativeNumber(record.followers),
     fees: {
@@ -105,20 +140,20 @@ export function normalizeRecord(input = {}, fallbackCampaignId = '') {
       sampleCost: toNonNegativeNumber(record.fees?.sampleCost),
       serviceCost: toNonNegativeNumber(record.fees?.serviceCost)
     },
-    metrics: {
-      impressions: toNonNegativeNumber(record.metrics?.impressions),
-      views: toNonNegativeNumber(record.metrics?.views),
-      likes: toNonNegativeNumber(record.metrics?.likes),
-      favorites: toNonNegativeNumber(record.metrics?.favorites),
-      comments: toNonNegativeNumber(record.metrics?.comments),
-      shares: toNonNegativeNumber(record.metrics?.shares),
-      follows: toNonNegativeNumber(record.metrics?.follows),
-      clicks: toNonNegativeNumber(record.metrics?.clicks),
-      orders: toNonNegativeNumber(record.metrics?.orders),
-      revenue: toNonNegativeNumber(record.metrics?.revenue),
-      grossProfit: toNonNegativeNumber(record.metrics?.grossProfit)
-    },
+    metrics: normalizeMetrics(record.metrics),
     updatedAt: new Date().toISOString()
+  };
+}
+
+export function normalizeSnapshot(input = {}, fallbackRecordId = '') {
+  const snapshot = createEmptySnapshot(input.recordId || fallbackRecordId, input);
+  return {
+    ...snapshot,
+    id: snapshot.id || createId('snapshot'),
+    recordId: snapshot.recordId || fallbackRecordId,
+    label: String(snapshot.label || '数据快照').trim(),
+    capturedAt: snapshot.capturedAt || new Date().toISOString(),
+    metrics: normalizeMetrics(snapshot.metrics)
   };
 }
 
@@ -150,6 +185,14 @@ export function validateRecord(record) {
   return errors;
 }
 
+export function validateSnapshot(snapshot) {
+  const errors = [];
+  if (!String(snapshot?.recordId || '').trim()) errors.push('快照缺少所属记录');
+  if (!String(snapshot?.capturedAt || '').trim()) errors.push('请选择数据时间');
+  if (!String(snapshot?.label || '').trim()) errors.push('请填写快照名称');
+  return errors;
+}
+
 export function normalizeDatabase(input) {
   const source = input && typeof input === 'object' ? input : {};
   const campaigns = Array.isArray(source.campaigns)
@@ -161,11 +204,57 @@ export function normalizeDatabase(input) {
       .filter((record) => campaignIds.has(record.campaignId))
       .map((record) => normalizeRecord(record, record.campaignId))
     : [];
+  const recordIds = new Set(records.map((record) => record.id));
+
+  const snapshotsByKey = new Map();
+  const rawSnapshots = Array.isArray(source.snapshots)
+    ? source.snapshots
+    : records.map((record) => createEmptySnapshot(record.id, {
+      label: '初始数据',
+      capturedAt: record.capturedAt || record.updatedAt || new Date().toISOString(),
+      metrics: record.metrics,
+      id: `snapshot_${record.id}_migration`
+    }));
+
+  for (const snapshot of rawSnapshots) {
+    if (!recordIds.has(snapshot.recordId)) continue;
+    const normalized = normalizeSnapshot(snapshot, snapshot.recordId);
+    snapshotsByKey.set(`${normalized.recordId}|${normalized.capturedAt}`, normalized);
+  }
+
+  for (const record of records) {
+    const ownSnapshots = [...snapshotsByKey.values()]
+      .filter((snapshot) => snapshot.recordId === record.id)
+      .sort((left, right) => new Date(left.capturedAt) - new Date(right.capturedAt));
+    if (ownSnapshots.length === 0) {
+      const snapshot = createEmptySnapshot(record.id, {
+        label: '当前数据',
+        capturedAt: record.capturedAt || record.updatedAt || new Date().toISOString(),
+        metrics: record.metrics
+      });
+      snapshotsByKey.set(`${snapshot.recordId}|${snapshot.capturedAt}`, snapshot);
+    }
+  }
+
+  const snapshots = [...snapshotsByKey.values()]
+    .sort((left, right) => new Date(left.capturedAt) - new Date(right.capturedAt));
+
+  const reconciledRecords = records.map((record) => {
+    const latest = [...snapshots]
+      .filter((snapshot) => snapshot.recordId === record.id)
+      .sort((left, right) => new Date(right.capturedAt) - new Date(left.capturedAt))[0];
+    return latest ? {
+      ...record,
+      metrics: latest.metrics,
+      capturedAt: latest.capturedAt
+    } : record;
+  });
 
   return {
     version: DATABASE_VERSION,
     campaigns,
-    records,
+    records: reconciledRecords,
+    snapshots,
     activeCampaignId: source.activeCampaignId || campaigns[0]?.id || '',
     updatedAt: new Date().toISOString()
   };

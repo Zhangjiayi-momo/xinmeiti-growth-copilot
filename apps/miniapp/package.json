@@ -1,0 +1,5 @@
+{
+  "private": true,
+  "type": "commonjs",
+  "description": "微信开发者工具中的原生小程序，Node 测试使用 CommonJS 解释模块。"
+}

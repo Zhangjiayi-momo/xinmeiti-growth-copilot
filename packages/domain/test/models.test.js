@@ -46,3 +46,18 @@ test('传入空 id 时仍会自动生成唯一标识', () => {
   assert.ok(campaign.id.startsWith('campaign_'));
   assert.ok(record.id.startsWith('record_'));
 });
+test('v1 数据库会自动迁移为指标快照', () => {
+  const campaign = createEmptyCampaign({ id: 'campaign_1', name: '测试', brand: '品牌', product: '产品', platforms: ['抖音'], budget: 1000 });
+  const record = createEmptyRecord('campaign_1', { id: 'record_1', name: '旧记录', metrics: { views: 1000, likes: 50 } });
+  const migrated = normalizeDatabase({ version: 1, campaigns: [campaign], records: [record] });
+  assert.equal(migrated.version, 2);
+  assert.equal(migrated.snapshots.length, 1);
+  assert.equal(migrated.snapshots[0].recordId, 'record_1');
+  assert.equal(migrated.snapshots[0].metrics.views, 1000);
+});
+
+test('演示数据为每条记录生成多阶段快照', () => {
+  const demo = createDemoDatabase();
+  assert.equal(demo.snapshots.length, demo.records.length * 3);
+  assert.ok(demo.snapshots.every((snapshot) => ['24小时', '72小时', '7天'].includes(snapshot.label)));
+});
