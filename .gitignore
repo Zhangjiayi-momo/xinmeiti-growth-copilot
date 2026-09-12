@@ -7,3 +7,5 @@ dist/
 Thumbs.db
 .vscode/
 .idea/
+data/database.json
+data/*.tmp

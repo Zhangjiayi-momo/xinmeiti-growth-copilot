@@ -108,10 +108,22 @@ export function aggregateMetrics(records = []) {
   };
 }
 
-export function peerKeyOf(record = {}) {
-  return `${record.platform || '未知'}::${record.recordType || 'content'}`;
+export function followerBandOf(record = {}) {
+  const followers = numeric(record.followers);
+  if (followers < 20000) return '0-2万';
+  if (followers < 100000) return '2-10万';
+  if (followers < 500000) return '10-50万';
+  return '50万以上';
 }
 
+export function peerKeyOf(record = {}, scope = 'platform-type-tier') {
+  const platform = record.platform || '未知';
+  const type = record.recordType || 'content';
+  if (scope === 'all') return 'all';
+  if (scope === 'platform') return platform;
+  if (scope === 'platform-type') return `${platform}::${type}`;
+  return `${platform}::${type}::${followerBandOf(record)}`;
+}
 function percentile(value, sortedUnique, direction) {
   if (!Number.isFinite(value) || sortedUnique.length === 0) return null;
   if (sortedUnique.length === 1) return 0.5;
@@ -129,10 +141,11 @@ function normalizedScore(components) {
   return Math.round((weighted / totalWeight) * 100);
 }
 
-export function attachEfficiencyIndexes(records = []) {
+export function attachEfficiencyIndexes(records = [], options = {}) {
+  const scope = options.scope || 'platform-type-tier';
   const cohorts = new Map();
   for (const record of records) {
-    const key = peerKeyOf(record);
+    const key = peerKeyOf(record, scope);
     if (!cohorts.has(key)) cohorts.set(key, []);
     cohorts.get(key).push(record);
   }
@@ -152,16 +165,15 @@ export function attachEfficiencyIndexes(records = []) {
         { weight: 0.35, percentile: percentile(row.cpe, cpeValues, 'lower') },
         { weight: 0.25, percentile: row.roas !== null ? percentile(row.roas, roasValues, 'higher') : percentile(row.cpa, cpaValues, 'lower') }
       ]);
-      indexes.set(record.id, { efficiencyIndex: score, cohortSize: cohort.length });
+      indexes.set(record.id, { efficiencyIndex: score, cohortSize: cohort.length, benchmarkScope: scope });
     });
   }
 
   return records.map((record) => ({
     ...record,
-    computed: { ...metricsOf(record), ...(indexes.get(record.id) || { efficiencyIndex: null, cohortSize: 0 }) }
+    computed: { ...metricsOf(record), ...(indexes.get(record.id) || { efficiencyIndex: null, cohortSize: 0, benchmarkScope: scope }) }
   }));
 }
-
 function changeRate(current, previous) {
   if (!Number.isFinite(current) || !Number.isFinite(previous) || previous <= 0) return null;
   return (current - previous) / previous;
@@ -193,9 +205,9 @@ function valueRank(value, cohortValues, direction = 'higher') {
   return percentile(value, sorted, direction);
 }
 
-export function buildRecommendation(record = {}, cohortRecords = [], objective = '内容互动') {
+export function buildRecommendation(record = {}, cohortRecords = [], objective = '内容互动', scope = 'platform-type-tier') {
   const current = metricsOf(record);
-  const comparable = cohortRecords.filter((item) => peerKeyOf(item) === peerKeyOf(record));
+  const comparable = cohortRecords.filter((item) => peerKeyOf(item, scope) === peerKeyOf(record, scope));
   const cohort = comparable.length ? comparable.map(metricsOf) : [current];
   const sampleSize = cohort.length;
   const confidence = sampleSize >= 5 ? 'high' : sampleSize >= 2 ? 'medium' : 'low';
@@ -271,9 +283,9 @@ function median(values) {
   return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
 }
 
-export function detectAnomalies(record = {}, snapshots = [], cohortRecords = [], objective = '内容互动') {
+export function detectAnomalies(record = {}, snapshots = [], cohortRecords = [], objective = '内容互动', scope = 'platform-type-tier') {
   const current = metricsOf(record);
-  const comparable = cohortRecords.filter((item) => peerKeyOf(item) === peerKeyOf(record));
+  const comparable = cohortRecords.filter((item) => peerKeyOf(item, scope) === peerKeyOf(record, scope));
   const cohort = (comparable.length ? comparable : [record]).map(metricsOf);
   const cpeMedian = median(cohort.map((item) => item.cpe));
   const ctrMedian = median(cohort.map((item) => item.ctr));
@@ -336,6 +348,31 @@ export function detectAnomalies(record = {}, snapshots = [], cohortRecords = [],
   }
 
   return issues.sort((left, right) => ({ high: 0, medium: 1, low: 2 }[left.level] - { high: 0, medium: 1, low: 2 }[right.level]));
+}
+function weekStart(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const day = date.getDay() || 7;
+  date.setHours(0, 0, 0, 0);
+  date.setDate(date.getDate() - day + 1);
+  return date;
+}
+
+export function campaignWeeklySeries(campaign = {}, records = []) {
+  const weeks = new Map();
+  for (const record of records.filter((item) => item.campaignId === campaign.id)) {
+    const start = weekStart(record.publishedAt || record.capturedAt || record.createdAt);
+    if (!start) continue;
+    const key = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`;
+    const metrics = metricsOf(record);
+    const row = weeks.get(key) || { key, label: `${start.getMonth() + 1}/${start.getDate()}`, cost: 0, revenue: 0, orders: 0, interactions: 0 };
+    row.cost += metrics.totalCost;
+    row.revenue += metrics.revenue;
+    row.orders += metrics.orders;
+    row.interactions += metrics.interaction;
+    weeks.set(key, row);
+  }
+  return [...weeks.values()].sort((left, right) => left.key.localeCompare(right.key)).slice(-8);
 }
 export function sortRecords(records, sortKey = 'efficiencyIndex', direction = 'desc') {
   const factor = direction === 'asc' ? 1 : -1;

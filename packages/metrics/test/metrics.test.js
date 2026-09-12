@@ -4,7 +4,9 @@ import {
   aggregateMetrics,
   attachEfficiencyIndexes,
   buildRecommendation,
+  campaignWeeklySeries,
   detectAnomalies,
+  followerBandOf,
   metricsOf,
   snapshotTrend,
   totalCost
@@ -12,7 +14,7 @@ import {
 
 function record(overrides = {}) {
   return {
-    id: overrides.id || 'r1', platform: overrides.platform || '小红书', recordType: overrides.recordType || 'creator', capturedAt: overrides.capturedAt,
+    id: overrides.id || 'r1', campaignId: overrides.campaignId || '', platform: overrides.platform || '小红书', recordType: overrides.recordType || 'creator', capturedAt: overrides.capturedAt, publishedAt: overrides.publishedAt || '2026-09-01', followers: overrides.followers || 50000,
     fees: { quote: 1000, adSpend: 200, sampleCost: 100, serviceCost: 0, ...overrides.fees },
     metrics: { impressions: 10000, views: 8000, likes: 500, favorites: 200, comments: 50, shares: 50, follows: 30, clicks: 200, orders: 10, revenue: 5000, grossProfit: 2400, ...overrides.metrics }
   };
@@ -102,4 +104,25 @@ test('异常检测能够发现缺少快照和过期数据', () => {
   const result = detectAnomalies(stale, [], [stale], '内容互动');
   assert.ok(result.some((item) => item.code === 'NO_SNAPSHOT'));
   assert.ok(result.some((item) => item.code === 'STALE_DATA'));
+});
+test('粉丝层级 benchmark 会隔离不同量级账号', () => {
+  const micro = record({ id: 'micro', followers: 10000 });
+  const macro = record({ id: 'macro', followers: 300000 });
+  assert.equal(followerBandOf(micro), '0-2万');
+  assert.equal(followerBandOf(macro), '10-50万');
+  const tiered = attachEfficiencyIndexes([micro, macro]);
+  assert.equal(tiered[0].computed.cohortSize, 1);
+  assert.equal(tiered[1].computed.cohortSize, 1);
+  const broad = attachEfficiencyIndexes([micro, macro], { scope: 'platform-type' });
+  assert.equal(broad[0].computed.cohortSize, 2);
+});
+test('战役周度趋势按自然周聚合成本和收入', () => {
+  const series = campaignWeeklySeries({ id: 'campaign_1' }, [
+    record({ id: 'a', campaignId: 'campaign_1', publishedAt: '2026-09-01' }),
+    record({ id: 'b', campaignId: 'campaign_1', publishedAt: '2026-09-03' }),
+    record({ id: 'c', campaignId: 'campaign_1', publishedAt: '2026-09-08' })
+  ]);
+  assert.equal(series.length, 2);
+  assert.equal(series[0].key, '2026-08-31');
+  assert.ok(series[0].cost > series[1].cost);
 });

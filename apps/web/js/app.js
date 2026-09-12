@@ -18,12 +18,24 @@ import {
   attachEfficiencyIndexes,
   metricsOf,
   buildRecommendation,
+  campaignWeeklySeries,
   detectAnomalies,
   snapshotTrend,
   sortRecords
 } from '../../../packages/metrics/src/metrics.js';
-import { loadDatabase, resetDatabase, saveDatabase, syncDatabaseFromIndexedDB } from './store.js';
+import {
+  getServerSyncState,
+  getSyncToken,
+  loadDatabase,
+  pushDatabaseToServer,
+  resetDatabase,
+  saveDatabase,
+  setSyncToken,
+  syncDatabaseFromIndexedDB,
+  syncDatabaseFromServer
+} from './store.js';
 import { csvTemplate, parseRecordsCsv, recordsToCsv } from './csv.js';
+import { createXlsxBlob } from './xlsx.js';
 import {
   downloadBlob,
   escapeAttribute,
@@ -52,19 +64,72 @@ const state = {
   recordSearch: '',
   recordSort: 'capturedAt',
   reviewAction: 'all',
-  lastImportMessage: ''
+  lastImportMessage: '',
+  storageSource: 'localStorage',
+  serverState: 'offline',
+  serverRevision: 0,
+  serverConflict: null,
+  syncToken: getSyncToken(),
+  syncError: '',
+  benchmarkScope: 'platform-type-tier'
 };
-
 if (!PAGE_META[state.view]) state.view = 'dashboard';
 
 async function initPersistence() {
-  const result = await syncDatabaseFromIndexedDB();
-  state.storageSource = result.source;
-  if (result.source === 'indexedDB') {
-    state.db = result.database;
-    render();
-    notify('已从 IndexedDB 恢复较新的本地数据');
+  const localResult = await syncDatabaseFromIndexedDB();
+  state.storageSource = localResult.source;
+  state.db = localResult.database;
+
+  const serverResult = await syncDatabaseFromServer(state.db);
+  state.serverState = serverResult.state;
+  state.serverRevision = serverResult.revision;
+  state.serverConflict = serverResult.conflict || null;
+  if (serverResult.source === 'server' || serverResult.conflict) {
+    state.db = serverResult.database;
   }
+
+  render();
+  if (serverResult.source === 'server') notify('已加载服务器上的较新数据');
+  if (serverResult.state === 'conflict') notify('检测到服务器版本冲突，已保留服务器数据', 'error');
+}
+
+async function syncWithServer() {
+  const result = await syncDatabaseFromServer(state.db);
+  state.serverState = result.state;
+  state.serverRevision = result.revision;
+  state.serverConflict = result.conflict || null;
+  state.db = result.database || state.db;
+  render();
+  if (result.state === 'conflict') return notify('检测到版本冲突，请刷新后确认服务器数据', 'error');
+  notify('本地与服务器已同步');
+}
+
+async function pushToServer() {
+  try {
+    const result = await pushDatabaseToServer(state.db, { baseRevision: state.serverRevision });
+    if (result.conflict) {
+      state.serverState = 'conflict';
+      state.serverConflict = result;
+      state.serverRevision = result.revision;
+      render();
+      return notify('服务器已有更新，已阻止覆盖', 'error');
+    }
+    state.serverState = 'synced';
+    state.serverRevision = result.revision;
+    state.serverConflict = null;
+    render();
+    notify('数据已推送到服务器');
+  } catch (error) {
+    state.serverState = 'offline';
+    render();
+    notify(error.message, 'error');
+  }
+}
+
+function saveSyncTokenFromForm() {
+  state.syncToken = setSyncToken(document.getElementById('sync-token')?.value || '');
+  render();
+  notify('同步令牌已保存');
 }
 function notify(message, type = 'success') {
   const root = document.getElementById('toast-root');
@@ -91,7 +156,7 @@ function snapshotsForRecord(recordId) {
 
 function issuesForRecord(record, cohort) {
   const objective = campaignById(record.campaignId)?.objective || '内容互动';
-  return detectAnomalies(record, state.db.snapshots, cohort, objective);
+  return detectAnomalies(record, state.db.snapshots, cohort, objective, state.benchmarkScope);
 }
 
 function renderIssueList(issues) {
@@ -152,7 +217,7 @@ function campaignById(id) {
 }
 
 function enrichedRecords() {
-  return attachEfficiencyIndexes(state.db.records);
+  return attachEfficiencyIndexes(state.db.records, { scope: state.benchmarkScope });
 }
 
 function scopeRecords(records, { useFilters = true } = {}) {
@@ -338,6 +403,8 @@ function renderCampaigns() {
   const cards = state.db.campaigns.map((campaign) => {
     const records = rows.filter((record) => record.campaignId === campaign.id);
     const metrics = aggregateMetrics(records);
+    const weekly = campaignWeeklySeries(campaign, records);
+    const maxWeekly = Math.max(...weekly.map((week) => Math.max(week.cost, week.revenue)), 1);
     const progress = campaign.budget > 0 ? Math.min(100, (metrics.totalSpend / campaign.budget) * 100) : 0;
     return `<article class="card campaign-card">
       <div class="campaign-top">
@@ -345,7 +412,10 @@ function renderCampaigns() {
         <span class="status-pill">${escapeHtml(campaign.objective)}</span>
       </div>
       <div>${campaign.platforms.map((platform) => `<span class="platform-pill">${escapeHtml(platform)}</span>`).join('')}</div>
-      <div class="campaign-meta">
+      ${weekly.length ? `<div class="campaign-weekly">
+        <div class="small muted">每周投放节奏 · 绿色为收入，橙色为成本</div>
+        <div class="weekly-bars">${weekly.map((week) => `<div class="weekly-bar" title="${escapeAttribute(week.label)}：成本 ${formatMoney(week.cost)}，收入 ${formatMoney(week.revenue)}"><span style="height:${Math.max(4, (week.revenue / maxWeekly) * 100)}%"></span><i style="height:${Math.max(4, (week.cost / maxWeekly) * 100)}%"></i><small>${escapeHtml(week.label)}</small></div>`).join('')}</div>
+      </div>` : ''}      <div class="campaign-meta">
         <div class="meta-box"><span>预算</span><strong>${formatMoney(campaign.budget, 0)}</strong></div>
         <div class="meta-box"><span>已花费</span><strong>${formatMoney(metrics.totalSpend, 0)}</strong></div>
         <div class="meta-box"><span>记录数</span><strong>${records.length}</strong></div>
@@ -420,6 +490,7 @@ function renderRecords() {
       <div class="field" style="min-width:210px"><label for="record-campaign">战役</label><select id="record-campaign" data-filter="campaign">${renderCampaignOptions(state.selectedCampaignId)}</select></div>
       <div class="field" style="min-width:150px"><label for="record-platform">平台</label><select id="record-platform" data-filter="platform"><option value="all">全部平台</option>${SUPPORTED_PLATFORMS.map((platform) => `<option value="${escapeAttribute(platform)}" ${state.platform === platform ? 'selected' : ''}>${escapeHtml(platform)}</option>`).join('')}</select></div>
       <div class="field" style="min-width:210px;flex:1"><label for="record-search">搜索</label><input id="record-search" data-filter="record-search" value="${escapeAttribute(state.recordSearch)}" placeholder="搜索记录名称、达人昵称"></div>
+      <div class="field" style="min-width:190px"><label for="record-benchmark">基准范围</label><select id="record-benchmark" data-filter="benchmark-scope"><option value="platform-type-tier" ${state.benchmarkScope === 'platform-type-tier' ? 'selected' : ''}>同平台 · 同类型 · 同粉丝层级</option><option value="platform-type" ${state.benchmarkScope === 'platform-type' ? 'selected' : ''}>同平台 · 同类型</option><option value="platform" ${state.benchmarkScope === 'platform' ? 'selected' : ''}>同平台</option><option value="all" ${state.benchmarkScope === 'all' ? 'selected' : ''}>全部记录</option></select></div>
       <div class="field" style="min-width:160px"><label for="record-sort">排序</label><select id="record-sort" data-filter="record-sort">${[['capturedAt','最近更新'],['efficiencyIndex','效率指数'],['cpe','CPE 最低'],['roas','ROAS 最高'],['totalCost','成本最高'],['roi','ROI 最高']].map(([key,label]) => `<option value="${key}" ${state.recordSort === key ? 'selected' : ''}>${label}</option>`).join('')}</select></div>
     </div>
     <section class="card">
@@ -443,7 +514,7 @@ function renderReview() {
     <section class="stack">${rows.map((record) => {
       const m = record.computed;
       const campaign = campaignById(record.campaignId);
-      const recommendation = buildRecommendation(record, rows, campaign?.objective || '内容互动');
+      const recommendation = buildRecommendation(record, rows, campaign?.objective || '内容互动', state.benchmarkScope);
       const confidenceLabel = { high: '较高', medium: '一般', low: '较低' }[recommendation.confidence] || '较低';
       return `<article class="review-card">
         <div class="review-card-head"><div><h3>${escapeHtml(record.name)}</h3><p>${escapeHtml(record.platform)} · ${record.recordType === 'creator' ? `达人 ${escapeHtml(record.creatorName)}` : '自营内容'} · ${escapeHtml(campaignName(record.campaignId))}</p></div><span class="score-pill ${efficiencyClass(m.efficiencyIndex)}">效率 ${m.efficiencyIndex === null ? '样本不足' : m.efficiencyIndex}</span></div>
@@ -476,6 +547,7 @@ function renderReview() {
     }).join('')}</section>`}`;
 }
 function renderData() {
+  const serverLabel = { offline: '未连接', synced: '已同步', conflict: '版本冲突' }[state.serverState] || '未连接';
   return `
     <section class="kpi-grid">
       ${metricCard('营销战役', formatNumber(state.db.campaigns.length), '当前本地数据', true)}
@@ -493,9 +565,22 @@ function renderData() {
         ${state.lastImportMessage ? `<div class="import-result ${state.lastImportMessage.includes('失败') ? 'error' : 'success'} show">${escapeHtml(state.lastImportMessage)}</div>` : ''}
       </div></article>
       <article class="card"><div class="card-body data-action">
+        <h4>服务器同步</h4>
+        <p>同源 API 使用版本号防止多人编辑时静默覆盖。团队部署时可通过环境变量启用同步令牌。</p>
+        <div class="server-status"><span class="live-dot"></span><strong>${serverLabel}</strong><small>Revision ${state.serverRevision}</small></div>
+        ${state.syncError ? `<div class="field-hint negative">最近错误：${escapeHtml(state.syncError)}</div>` : ''}
+        <div class="field"><label for="sync-token">同步令牌</label><input id="sync-token" type="password" value="${escapeAttribute(state.syncToken)}" placeholder="服务器未启用时留空"></div>
+        <div class="actions">
+          <button class="button secondary small" data-action="save-sync-token">保存令牌</button>
+          <button class="button primary small" data-action="sync-server">立即同步</button>
+          <button class="button ghost small" data-action="push-server">推送本地</button>
+        </div>
+      </div></article>
+      <article class="card"><div class="card-body data-action">
         <h4>导出当前数据</h4><p>CSV 用于表格复盘；JSON 可用于备份或迁移到云端版本。</p>
         <div><button class="button secondary" data-action="export-csv">导出 CSV</button></div>
-        <div><button class="button secondary" data-action="export-excel">导出 Excel 兼容文件</button></div>
+        <div><button class="button primary" data-action="export-xlsx">导出 XLSX</button></div>
+        <div><button class="button secondary" data-action="export-excel">导出 Excel 兼容 .xls</button></div>
         <div><button class="button secondary" data-action="export-json">导出 JSON</button></div>
         <div><button class="button ghost" data-action="download-template">下载 CSV 模板</button></div>
       </div></article>
@@ -850,15 +935,9 @@ function exportJson() {
   notify('JSON 已导出');
 }
 
-function excelCell(value) {
-  let text = String(value ?? '');
-  if (/^[=+\-@]/.test(text)) text = `'${text}`;
-  return `<td>${escapeHtml(text)}</td>`;
-}
-
-function exportExcel() {
-  if (!state.db.records.length) return notify('暂无数据可导出', 'error');
+function excelExportData() {
   const campaignNameMap = new Map(state.db.campaigns.map((campaign) => [campaign.id, campaign.name]));
+  const headers = ['战役', '记录名称', '类型', '平台', '达人昵称', '粉丝数', '报价', '广告费', '样品成本', '服务费', '总成本', '曝光量', '阅读/播放', '点赞', '收藏', '评论', '分享', '涨粉', '点击', '订单', '收入', '毛利', '互动率', 'CPE', 'CPA', 'ROAS', 'ROI', '行动', '备注', '数据时间'];
   const rows = state.db.records.map((record) => {
     const metrics = metricsOf(record);
     return [
@@ -871,10 +950,32 @@ function exportExcel() {
       metrics.cpa, metrics.roas, metrics.roi, record.review?.action || '', record.review?.note || '', record.capturedAt
     ];
   });
-  const headers = ['战役','记录名称','类型','平台','达人昵称','粉丝数','报价','广告费','样品成本','服务费','总成本','曝光量','阅读/播放','点赞','收藏','评论','分享','涨粉','点击','订单','收入','毛利','互动率','CPE','CPA','ROAS','ROI','行动','备注','数据时间'];
-  const html = `<html><head><meta charset="utf-8"><style>table{border-collapse:collapse}th,td{border:1px solid #ccc;padding:6px;white-space:nowrap}th{background:#e6f6f3;font-weight:bold}</style></head><body><table><thead><tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join('')}</tr></thead><tbody>${rows.map((row) => `<tr>${row.map(excelCell).join('')}</tr>`).join('')}</tbody></table></body></html>`;
+  return { headers, rows };
+}
+
+function htmlExcelCell(value) {
+  let text = String(value ?? '');
+  if (/^[=+\-@]/.test(text)) text = `'${text}`;
+  return `<td>${escapeHtml(text)}</td>`;
+}
+
+function exportExcel() {
+  if (!state.db.records.length) return notify('暂无数据可导出', 'error');
+  const { headers, rows } = excelExportData();
+  const html = `<html><head><meta charset="utf-8"><style>table{border-collapse:collapse}th,td{border:1px solid #ccc;padding:6px;white-space:nowrap}th{background:#e6f6f3;font-weight:bold}</style></head><body><table><thead><tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join('')}</tr></thead><tbody>${rows.map((row) => `<tr>${row.map(htmlExcelCell).join('')}</tr>`).join('')}</tbody></table></body></html>`;
   downloadBlob(`新媒体投放数据_${todayIso()}.xls`, '\uFEFF' + html, 'application/vnd.ms-excel;charset=utf-8');
   notify('Excel 兼容文件已导出');
+}
+
+function exportXlsx() {
+  if (!state.db.records.length) return notify('暂无数据可导出', 'error');
+  const { headers, rows } = excelExportData();
+  downloadBlob(
+    `新媒体投放数据_${todayIso()}.xlsx`,
+    createXlsxBlob(headers, rows, '投放数据'),
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  );
+  notify('XLSX 文件已导出');
 }
 async function importCsv() {
   const file = document.getElementById('csv-file')?.files?.[0];
@@ -973,6 +1074,10 @@ document.addEventListener('click', (event) => {
   if (action === 'export-report') exportWeeklyReport();
   if (action === 'export-csv') exportCsv();
   if (action === 'export-excel') exportExcel();
+  if (action === 'export-xlsx') exportXlsx();
+  if (action === 'save-sync-token') saveSyncTokenFromForm();
+  if (action === 'sync-server') syncWithServer();
+  if (action === 'push-server') pushToServer();
   if (action === 'export-json') exportJson();
   if (action === 'download-template') downloadTemplate();
   if (action === 'import-csv') importCsv();
@@ -1016,7 +1121,10 @@ document.addEventListener('change', (event) => {
     state.recordSort = event.target.value;
     refreshRecordTable();
   }
-  if (filter === 'review-action') {
+  if (filter === 'benchmark-scope') {
+    state.benchmarkScope = event.target.value;
+    render();
+  }  if (filter === 'review-action') {
     state.reviewAction = event.target.value;
     render();
   }
@@ -1038,4 +1146,21 @@ window.addEventListener('hashchange', () => {
 });
 
 render();
-initPersistence();
+initPersistence().catch((error) => {
+  state.serverState = 'offline';
+  state.syncError = error.message;
+  console.error('初始化持久化失败', error);
+  render();
+});
+
+if (new URLSearchParams(location.search).has('debug')) {
+  window.__XINMEITI_DEBUG__ = () => ({
+    view: state.view,
+    storageSource: state.storageSource,
+    serverState: state.serverState,
+    serverRevision: state.serverRevision,
+    syncError: state.syncError,
+    records: state.db.records.length,
+    snapshots: state.db.snapshots.length
+  });
+}

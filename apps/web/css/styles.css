@@ -378,3 +378,48 @@ tbody tr:hover { background: #fbfdfc; }
 .issue-item span { display: block; }
 .issue-item strong { font-size: 12px; }
 .issue-item span { margin-top: 5px; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.server-status {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 11px 12px;
+  border-radius: 12px;
+  background: #f2f8f6;
+}
+.server-status .live-dot { margin: 0; }
+.server-status strong { font-size: 12px; }
+.server-status small { margin-left: auto; color: var(--muted); font-size: 10px; }
+.campaign-weekly {
+  padding: 12px;
+  border-radius: 13px;
+  background: #f8fbfa;
+}
+.weekly-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  height: 78px;
+  margin-top: 10px;
+}
+.weekly-bar {
+  position: relative;
+  flex: 1;
+  height: 58px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 3px;
+}
+.weekly-bar span,
+.weekly-bar i { width: 8px; min-height: 4px; border-radius: 4px 4px 2px 2px; }
+.weekly-bar span { background: #33a985; }
+.weekly-bar i { background: #ef9a63; }
+.weekly-bar small {
+  position: absolute;
+  top: 61px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: #849297;
+  font-size: 9px;
+  white-space: nowrap;
+}
