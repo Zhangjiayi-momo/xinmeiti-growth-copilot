@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="refresh" content="0; url=apps/web/">
+  <title>新媒体增长作战台</title>
+</head>
+<body>
+  <p>
+    正在进入新媒体增长作战台……
+  </p>
+  <p>
+    <a href="apps/web/">如果没有自动跳转，请点击这里</a>
+  </p>
+  <script>
+    window.location.replace("apps/web/");
+  </script>
+</body>
+</html>
